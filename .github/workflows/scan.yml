@@ -1,16 +1,17 @@
 name: Stock scan
 
 on:
-  schedule:
+    schedule:
     # GitHub cron is in UTC. IST = UTC + 5:30.
     # Every 5 min from 09:15 to 15:15 IST on weekdays (03:45-09:45 UTC)
     - cron: "45,50,55 3 * * 1-5"
     - cron: "*/5 4-8 * * 1-5"
     - cron: "0,5,10,15,20,25,30,35,40,45 9 * * 1-5"
-    # One evening run at 16:10 IST (backtest view with same-day outcome)
-    - cron: "40 10 * * 1-5"
+    # Evening re-checks for late bhavcopy + after-hours results (18:30, 19:30, 20:30 IST)
+    - cron: "0 13 * * 1-5"
+    - cron: "0 14 * * 1-5"
+    - cron: "0 15 * * 1-5"
   workflow_dispatch:
-
 concurrency:
   group: scan
   cancel-in-progress: false
