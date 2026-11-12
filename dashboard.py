@@ -163,8 +163,12 @@ def _github_cfg():
     try:
         sys.path.insert(0, HERE)
         import angel_config as ac
-        return (str(getattr(ac, "GITHUB_TOKEN", "")).strip(),
-                str(getattr(ac, "GITHUB_REPO", "")).strip())
+        repo = str(getattr(ac, "GITHUB_REPO", "")).strip()
+        # accept "owner/repo", a full github.com URL, or a .git URL
+        repo = repo.replace("https://", "").replace("http://", "")
+        repo = repo.replace("www.github.com/", "").replace("github.com/", "")
+        repo = repo.rstrip("/").removesuffix(".git")
+        return str(getattr(ac, "GITHUB_TOKEN", "")).strip(), repo
     except ImportError:
         return "", ""
 
