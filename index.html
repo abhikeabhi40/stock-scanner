@@ -1,0 +1,72 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Stock Scanner</title>
+<meta http-equiv="refresh" content="60">
+<style>
+ body{font-family:Segoe UI,Arial,sans-serif;background:#0f1419;color:#e6e6e6;margin:0;padding:16px}
+ h1{font-size:20px;margin:0 0 4px} h2{font-size:16px;margin:24px 0 8px;color:#9fd3ff}
+ .meta{color:#9aa;font-size:13px;margin-bottom:12px}
+ table{border-collapse:collapse;width:100%;font-size:13px}
+ th,td{padding:6px 8px;border-bottom:1px solid #223;text-align:right;white-space:nowrap}
+ th{color:#9aa;font-weight:600;background:#151c24;position:sticky;top:0}
+ td:first-child,th:first-child,td.l,th.l{text-align:left}
+ tr:hover{background:#16202a}
+ .A{color:#4ade80;font-weight:700}.B{color:#facc15;font-weight:700}
+ .BOTH{background:#1b3a2a;color:#4ade80;padding:1px 6px;border-radius:4px;font-size:11px}
+ .RESULTS{background:#1e2f4a;color:#9fd3ff;padding:1px 6px;border-radius:4px;font-size:11px}
+ .VOLUME{background:#3a2a1b;color:#fbbf24;padding:1px 6px;border-radius:4px;font-size:11px}
+ .pos{color:#4ade80}.neg{color:#f87171}.dim{color:#778;font-size:11px}
+ .yes{color:#4ade80}.no{color:#667}
+ .warn{background:#2a1f10;border:1px solid #5a4010;color:#fbbf24;padding:8px 12px;border-radius:6px;font-size:13px;margin:10px 0}
+ pre{background:#0b0f14;color:#9aa;font-size:11px;padding:8px;border-radius:6px;max-height:160px;overflow:auto}
+</style></head><body>
+<h1>Stock Scanner <span id="status" class="dim"></span></h1>
+<div class="meta" id="meta"></div>
+<div class="warn">Targets T1/T2/T3 are price levels, not predictions. Most picks stop between +3% and +8%.
+Always use the stop-loss. This is a research tool, not financial advice.</div>
+<h2 id="h_top"></h2><div id="top"></div>
+<h2 id="h_both"></h2><div id="both"></div>
+<h2 id="h_res"></h2><div id="res"></div>
+<h2 id="h_vol"></h2><div id="vol"></div>
+<h2>Log</h2><pre id="log"></pre>
+<script>
+const pct=(v,d=1)=>v==null?'-':((v>0?'+':'')+v.toFixed(d)+'%');
+const cls=v=>v==null?'':(v>=0?'pos':'neg');
+function table(rows,backtest){
+ if(!rows.length) return '<div class="dim">none</div>';
+ let h='<table><tr><th>#</th><th class="l">Stock</th><th>Grade</th><th class="l">Source</th><th>Score</th><th>Price</th><th>Chg</th><th>Vol % of day</th><th>Turnover</th><th>VWAP</th><th class="l">News</th><th>Stop -'+STOP+'%</th>';
+ TG.forEach((t,i)=>h+='<th>T'+(i+1)+' +'+t+'%</th>');
+ if(backtest) h+='<th>Max in '+HOLD+'d</th><th>Exit</th><th>T1</th><th>T2</th><th>T3</th><th>Stop hit</th>';
+ h+='<th class="l">Missed</th></tr>';
+ rows.forEach((m,i)=>{
+  h+='<tr><td>'+(i+1)+'</td><td class="l"><b>'+m.symbol+'</b>'+(m.results?'<div class="dim">'+m.results+'</div>':'')+'</td>'
+   +'<td class="'+m.grade+'">'+m.grade+'</td><td class="l"><span class="'+m.source+'">'+m.source+'</span></td>'
+   +'<td>'+Math.round(m.score)+'</td><td>'+m.price.toFixed(2)+'</td><td class="'+cls(m.change)+'">'+pct(m.change)+'</td>'
+   +'<td>'+Math.round(m.vol_pct)+'%</td><td>'+m.turnover_cr.toFixed(1)+'cr</td><td>'+(m.above_vwap?'Y':'N')+'</td>'
+   +'<td class="l">'+(m.news||'-')+'</td><td>'+m.plan.stop.toFixed(2)+'</td>';
+  m.plan.targets.forEach(t=>h+='<td>'+t.toFixed(2)+'</td>');
+  if(backtest){
+   h+='<td class="'+cls(m.max_gain)+'">'+pct(m.max_gain,2)+'</td><td class="'+cls(m.exit_gain)+'">'+pct(m.exit_gain,2)+'</td>';
+   [1,2,3].forEach(k=>h+='<td class="'+(m['hit_'+k]?'yes':'no')+'">'+(m['hit_'+k]?'YES':'no')+'</td>');
+   h+='<td class="'+(m.sl_hit_first?'neg':'dim')+'">'+(m.sl_hit_first?'YES':'no')+'</td>';
+  }
+  h+='<td class="l dim">'+(m.fails||'')+'</td></tr>';
+ });
+ return h+'</table>';
+}
+let STOP=3,TG=[5,10,20],HOLD=3;
+fetch('data.json?t=' + Date.now()).then(r=>r.json()).then(d=>{
+ STOP=d.stop_loss;TG=d.targets;HOLD=d.hold_days;
+ const bt=d.mode==='BACKTEST'&&d.top10.some(m=>m.max_gain!=null);
+ document.getElementById('status').textContent=d.status;
+ document.getElementById('meta').innerHTML='Mode: <b>'+d.mode+'</b> &nbsp; Scan: <b>'+d.date+' '+d.scan_time+'</b> &nbsp; Updated: '+(d.updated||'-')+' &nbsp; Next scan: '+(d.next||'-')+' &nbsp; (page refreshes every 60s)';
+ document.getElementById('h_top').textContent='TOP '+d.top10.length+' STOCKS (hold up to '+HOLD+' days)';
+ document.getElementById('top').innerHTML=table(d.top10,bt);
+ document.getElementById('h_both').textContent='1. BOTH - heavy volume AND results trigger ('+d.counts.both+')  <- strongest';
+ document.getElementById('both').innerHTML=table(d.both,bt);
+ document.getElementById('h_res').textContent='2. RESULTS ONLY ('+d.results_only.length+')';
+ document.getElementById('res').innerHTML=table(d.results_only,bt);
+ document.getElementById('h_vol').textContent='3. VOLUME ONLY ('+d.volume_only.length+')';
+ document.getElementById('vol').innerHTML=table(d.volume_only,bt);
+ document.getElementById('log').textContent=d.log.slice().reverse().join('\n');
+});
+</script></body></html>
