@@ -1,7 +1,7 @@
 name: Stock scan
 
 on:
-    schedule:
+  schedule:
     # GitHub cron is in UTC. IST = UTC + 5:30.
     # Every 5 min from 09:15 to 15:15 IST on weekdays (03:45-09:45 UTC)
     - cron: "45,50,55 3 * * 1-5"
