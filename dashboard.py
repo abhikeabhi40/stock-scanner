@@ -75,19 +75,32 @@ def log(msg):
 # RUN SCANNERS
 # ============================================================
 
+LIVE_OUTPUT = os.environ.get("GITHUB_ACTIONS") == "true"
+
+
 def run_scanner(name, path):
     fd, tmp = tempfile.mkstemp(prefix=f"{name}_", suffix=".json")
     os.close(fd)
-    env = dict(os.environ, SCANNER_JSON_OUT=tmp, RESULTS_SCANNER_CHILD="1")
-    p = subprocess.run([sys.executable, path], env=env, cwd=HERE, capture_output=True, text=True)
+    env = dict(os.environ, SCANNER_JSON_OUT=tmp, RESULTS_SCANNER_CHILD="1",
+               PYTHONUNBUFFERED="1")
+    if LIVE_OUTPUT:
+        # Stream the child's prints straight through so GitHub Actions logs
+        # show live progress instead of nothing until it finishes/times out.
+        print(f"\n----- {name}: {os.path.basename(path)} -----", flush=True)
+        p = subprocess.run([sys.executable, "-u", path], env=env, cwd=HERE, text=True)
+    else:
+        p = subprocess.run([sys.executable, path], env=env, cwd=HERE,
+                           capture_output=True, text=True)
     data = {"top": [], "all": []}
     try:
         if os.path.getsize(tmp) > 0:
             with open(tmp) as fh:
                 data = json.load(fh)
-        else:
+        elif not LIVE_OUTPUT:
             tail = ((p.stdout or "") + (p.stderr or "")).strip().splitlines()[-2:]
             log(f"{name}: no result. " + " | ".join(tail))
+        else:
+            log(f"{name}: no result (exit code {p.returncode})")
     except Exception as err:
         log(f"{name}: could not read result ({err})")
     finally:
