@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 concurrency:
   group: scan
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -22,7 +22,7 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       TZ: Asia/Kolkata
       ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
