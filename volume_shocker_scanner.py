@@ -488,13 +488,56 @@ for r in snap:
              news="-", news_items=[])
     results.append(r)
 
-if not results:
+# ---- STEADY CLIMBERS (modest, steady movers with NO volume spike and no
+# news trigger - lower-confidence than the main shockers, but this is the
+# only way to catch a slow all-day grind that never shows up as a volume
+# shock or a results reaction) ----
+CLIMBER_MIN_CHANGE = 0.8    # already up at least this much, not flat
+CLIMBER_MAX_CHANGE = 6.0    # above this it would already show as a shocker
+CLIMBER_MAX_DIST_FROM_HIGH = 3.0   # must be near today's high, not fading
+shocker_syms = {r["symbol"] for r in results}
+climbers = []
+for r in snap:
+    if r["symbol"] in shocker_syms:
+        continue
+    price, prev = r["price"], r["prev_close"]
+    if not prev:
+        continue
+    change = (price - prev) / prev * 100
+    if not (CLIMBER_MIN_CHANGE <= change <= CLIMBER_MAX_CHANGE):
+        continue
+    if price < MIN_PRICE:
+        continue
+    turnover = r["volume"] * (r["vwap"] or price) / 1e7
+    if turnover < MIN_TURNOVER_HARD_CR:
+        continue
+    above_vwap = r["vwap"] is not None and price > r["vwap"]
+    if not above_vwap:
+        continue
+    dist_high = (r["day_high"] - price) / price * 100 if r["day_high"] else 0
+    if dist_high > CLIMBER_MAX_DIST_FROM_HIGH:
+        continue
+    gap = (r["open"] - prev) / prev * 100 if r["open"] else 0
+    vol_pct = r["volume"] / r["avg_vol"] * 100 if r["avg_vol"] else 0
+    breakout = price > r["high_20d"]
+    score = change * 8 + max(0, CLIMBER_MAX_DIST_FROM_HIGH - dist_high) * 5 \
+        + (10 if breakout else 0) + min(turnover / 10, 1) * 10
+    row = dict(r)
+    row.update(change=change, gap=gap, vol_pct=vol_pct, turnover_cr=turnover,
+               dist_high=dist_high, above_vwap=above_vwap, breakout_20d=breakout,
+               fails="steady climb, not a volume shock - lower confidence",
+               grade="C", score=score, news="-", news_items=[])
+    climbers.append(row)
+climbers.sort(key=lambda x: x["score"], reverse=True)
+climbers = climbers[:TOP_N]
+
+if not results and not climbers:
     if os.getenv("SCANNER_JSON_OUT"):
         import json
         with open(os.environ["SCANNER_JSON_OUT"], "w") as fh:
             json.dump({"mode": MODE, "date": TEST_DATE, "scan_time": SCAN_TIME,
-                       "top": [], "all": []}, fh)
-    print("No volume shockers found. Try a later SCAN_TIME or lower MIN_VOL_PCT_HARD.")
+                       "top": [], "all": [], "climbers": []}, fh)
+    print("No volume shockers or steady climbers found. Try a later SCAN_TIME or lower MIN_VOL_PCT_HARD.")
     sys.exit(0)
 
 # ============================================================
@@ -587,6 +630,16 @@ if CHECK_NEWS:
         txt = " | ".join(f"[{n['tag']}] {n['subject']}" for n in heads) or "no announcements"
         print(f"  {m['symbol']:<13} {txt[:150]}")
 
+if climbers:
+    print("\n" + "=" * 118)
+    print(f"STEADY CLIMBERS at {SCAN_TIME} on {TEST_DATE}  "
+          f"(no volume spike, no news - lower confidence, {len(climbers)} found)")
+    print("=" * 118)
+    for i, m in enumerate(climbers, 1):
+        print(f"{i:>2}. {m['symbol']:<13} score {m['score']:>5.0f} | "
+              f"price {m['price']:>9.2f} | chg {m['change']:+5.1f}% | "
+              f"{m['dist_high']:4.1f}% off high | VWAP Y | {m['turnover_cr']:5.1f}cr")
+
 print("\nTRADE PLAN (if you take it)")
 for m in top:
     e = m["price"]
@@ -650,4 +703,4 @@ if os.getenv("SCANNER_JSON_OUT"):
     import json
     with open(os.environ["SCANNER_JSON_OUT"], "w") as fh:
         json.dump({"mode": MODE, "date": TEST_DATE, "scan_time": SCAN_TIME,
-                   "top": top, "all": results}, fh, default=str)
+                   "top": top, "all": results, "climbers": climbers}, fh, default=str)

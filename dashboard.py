@@ -52,7 +52,7 @@ sys.dont_write_bytecode = True
 
 STATE = {"status": "starting", "updated": None, "next": None, "mode": "", "date": "",
          "scan_time": "", "top10": [], "both": [], "results_only": [], "volume_only": [],
-         "log": [], "counts": {}}
+         "climbers": [], "log": [], "counts": {}}
 LOCK = threading.Lock()
 
 
@@ -151,6 +151,7 @@ def scan():
     combined.sort(key=lambda x: x[0], reverse=True)
     v_top = [m["symbol"] for m in vol.get("top", [])]
     r_top = [m["symbol"] for m in res.get("top", [])]
+    climbers = [slim(m, "CLIMBER") for m in vol.get("climbers", [])][:TOP_N]
     with LOCK:
         STATE.update({
             "status": "ok", "updated": datetime.now().strftime("%d-%b %H:%M:%S"),
@@ -161,6 +162,7 @@ def scan():
             "both": [m for _, m in combined if m["source"] == "BOTH"][:TOP_N],
             "results_only": [slim(r_all[s], "RESULTS") for s in r_top if s not in both][:TOP_N],
             "volume_only": [slim(v_all[s], "VOLUME") for s in v_top if s not in both][:TOP_N],
+            "climbers": climbers,
             "counts": {"volume": len(v_all), "results": len(r_all), "both": len(both)},
         })
     log(f"scan done in {time.time() - t0:.0f}s: {len(v_all)} volume, {len(r_all)} results, "
@@ -267,7 +269,8 @@ HTML = """<!doctype html>
  th{color:#9aa;font-weight:600;background:#151c24;position:sticky;top:0}
  td:first-child,th:first-child,td.l,th.l{text-align:left}
  tr:hover{background:#16202a}
- .A{color:#4ade80;font-weight:700}.B{color:#facc15;font-weight:700}
+ .A{color:#4ade80;font-weight:700}.B{color:#facc15;font-weight:700}.C{color:#9aa;font-weight:700}
+ .CLIMBER{background:#2a2a1b;color:#d4c07a;padding:1px 6px;border-radius:4px;font-size:11px}
  .BOTH{background:#1b3a2a;color:#4ade80;padding:1px 6px;border-radius:4px;font-size:11px}
  .RESULTS{background:#1e2f4a;color:#9fd3ff;padding:1px 6px;border-radius:4px;font-size:11px}
  .VOLUME{background:#3a2a1b;color:#fbbf24;padding:1px 6px;border-radius:4px;font-size:11px}
@@ -284,6 +287,10 @@ Always use the stop-loss. This is a research tool, not financial advice.</div>
 <h2 id="h_both"></h2><div id="both"></div>
 <h2 id="h_res"></h2><div id="res"></div>
 <h2 id="h_vol"></h2><div id="vol"></div>
+<h2 id="h_climb"></h2>
+<div class="warn" style="margin-top:0">Lower confidence: these moved up steadily with NO volume spike and NO news
+trigger. Most won't reach the bigger targets - treat as a watch-list, not a strong signal.</div>
+<div id="climb"></div>
 <h2>Log</h2><pre id="log"></pre>
 <script>
 const pct=(v,d=1)=>v==null?'-':((v>0?'+':'')+v.toFixed(d)+'%');
@@ -324,6 +331,8 @@ fetch('/data.json').then(r=>r.json()).then(d=>{
  document.getElementById('res').innerHTML=table(d.results_only,bt);
  document.getElementById('h_vol').textContent='3. VOLUME ONLY ('+d.volume_only.length+')';
  document.getElementById('vol').innerHTML=table(d.volume_only,bt);
+ document.getElementById('h_climb').textContent='4. STEADY CLIMBERS ('+(d.climbers||[]).length+')';
+ document.getElementById('climb').innerHTML=table(d.climbers||[],bt);
  document.getElementById('log').textContent=d.log.slice().reverse().join('\\n');
 });
 </script></body></html>"""
