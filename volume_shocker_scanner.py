@@ -376,16 +376,24 @@ else:
     if day.empty:
         print(f"No NSE data for {TEST_DATE} (holiday, or file not published yet).")
         sys.exit(1)
-    # Only stocks that COULD have qualified at SCAN_TIME:
-    # full-day volume >= hard minimum and day high >= minimum change
+    # Only stocks that COULD have qualified at SCAN_TIME (either as a
+    # shocker or as a steady climber - the loosest real floor is the
+    # climber minimum of +0.8%). This candidate list drives a slow
+    # one-by-one intraday fetch (rate-limited by the broker's API to a
+    # few requests/sec), so keeping it tight matters: "any green stock
+    # with >=0.5cr traded" let through over half the market (1200+
+    # stocks, 25-30+ min to fetch). Requiring a real move and real
+    # liquidity cuts that down a lot without losing genuine candidates.
+    CAND_MIN_CHANGE = 0.8        # matches CLIMBER_MIN_CHANGE below
+    CAND_MIN_TURNOVER_CR = 1.5
     cand = []
     for s in stats.index:
         if s not in day.index:
             continue
         d = day.loc[s]
         st = stats.loc[s]
-        if (d["h"] > d["prev"] * 1.0
-                and d["val"] / 1e7 >= MIN_TURNOVER_HARD_CR):
+        if (d["h"] >= d["prev"] * (1 + CAND_MIN_CHANGE / 100)
+                and d["val"] / 1e7 >= CAND_MIN_TURNOVER_CR):
             cand.append(s)
     print(f"Candidates that could qualify at {SCAN_TIME}: {len(cand)} "
           f"(of {len(stats)}) - fetching intraday data...")
