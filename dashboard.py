@@ -77,7 +77,7 @@ def log(msg):
 # RUN SCANNERS
 # ============================================================
 
-LIVE_OUTPUT = os.environ.get("GITHUB_ACTIONS") == "true"
+LIVE_OUTPUT = True
 
 
 def run_scanner(name, path):
