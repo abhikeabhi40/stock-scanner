@@ -43,7 +43,8 @@ PUBLISH_ONLINE = True
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCANNERS = {"VOLUME": os.path.join(HERE, "volume_shocker_scanner.py"),
-            "RESULTS": os.path.join(HERE, "results_day_scanner.py")}
+            "RESULTS": os.path.join(HERE, "results_day_scanner.py"),
+            "FO": os.path.join(HERE, "fo_scanner.py")}
 NSE_HOLIDAYS_2026 = ["2026-01-26", "2026-03-03", "2026-03-26", "2026-03-31",
                      "2026-04-03", "2026-04-14", "2026-05-01", "2026-05-28",
                      "2026-06-26", "2026-09-14", "2026-10-02", "2026-10-20",
@@ -52,7 +53,8 @@ sys.dont_write_bytecode = True
 
 STATE = {"status": "starting", "updated": None, "next": None, "mode": "", "date": "",
          "scan_time": "", "top10": [], "both": [], "results_only": [], "volume_only": [],
-         "climbers": [], "log": [], "counts": {}}
+         "climbers": [], "fo": [], "fo_date": "", "checked_at": None, "data_from": None,
+         "log": [], "counts": {}}
 LOCK = threading.Lock()
 
 
@@ -134,6 +136,7 @@ def scan():
     t0 = time.time()
     vol = run_scanner("VOLUME", SCANNERS["VOLUME"])
     res = run_scanner("RESULTS", SCANNERS["RESULTS"])
+    fo = run_scanner("FO", SCANNERS["FO"])
     v_all = {m["symbol"]: m for m in vol.get("all", [])}
     r_all = {m["symbol"]: m for m in res.get("all", [])}
     both = [s for s in v_all if s in r_all]
@@ -163,10 +166,13 @@ def scan():
             "results_only": [slim(r_all[s], "RESULTS") for s in r_top if s not in both][:TOP_N],
             "volume_only": [slim(v_all[s], "VOLUME") for s in v_top if s not in both][:TOP_N],
             "climbers": climbers,
-            "counts": {"volume": len(v_all), "results": len(r_all), "both": len(both)},
+            "fo": fo.get("top", [])[:TOP_N],
+            "fo_date": fo.get("date") or "",
+            "counts": {"volume": len(v_all), "results": len(r_all), "both": len(both),
+                       "fo": len(fo.get("all", []))},
         })
     log(f"scan done in {time.time() - t0:.0f}s: {len(v_all)} volume, {len(r_all)} results, "
-        f"{len(both)} both")
+        f"{len(both)} both, {len(fo.get('all', []))} F&O moves")
     publish()
 
 
@@ -271,6 +277,10 @@ HTML = """<!doctype html>
  tr:hover{background:#16202a}
  .A{color:#4ade80;font-weight:700}.B{color:#facc15;font-weight:700}.C{color:#9aa;font-weight:700}
  .CLIMBER{background:#2a2a1b;color:#d4c07a;padding:1px 6px;border-radius:4px;font-size:11px}
+ .LONGBUILDUP{background:#1b3a2a;color:#4ade80;padding:1px 6px;border-radius:4px;font-size:11px}
+ .SHORTBUILDUP{background:#3a1b1b;color:#f87171;padding:1px 6px;border-radius:4px;font-size:11px}
+ .SHORTCOVERING{background:#1e2f4a;color:#9fd3ff;padding:1px 6px;border-radius:4px;font-size:11px}
+ .LONGUNWINDING{background:#2a2410;color:#fbbf24;padding:1px 6px;border-radius:4px;font-size:11px}
  .BOTH{background:#1b3a2a;color:#4ade80;padding:1px 6px;border-radius:4px;font-size:11px}
  .RESULTS{background:#1e2f4a;color:#9fd3ff;padding:1px 6px;border-radius:4px;font-size:11px}
  .VOLUME{background:#3a2a1b;color:#fbbf24;padding:1px 6px;border-radius:4px;font-size:11px}
@@ -291,6 +301,12 @@ Always use the stop-loss. This is a research tool, not financial advice.</div>
 <div class="warn" style="margin-top:0">Lower confidence: these moved up steadily with NO volume spike and NO news
 trigger. Most won't reach the bigger targets - treat as a watch-list, not a strong signal.</div>
 <div id="climb"></div>
+<h2 id="h_fo"></h2>
+<div class="warn" style="margin-top:0">Experimental, and NOT more accurate than the sections above - it's a different
+signal (what F&amp;O traders are positioning for), not a prediction. Only NSE stocks with F&amp;O contracts appear here
+(~180-200 stocks total). Margin shown is a rough estimate only - confirm the real figure with your broker before
+trading. F&amp;O uses leverage - size positions carefully.</div>
+<div id="fo"></div>
 <h2>Log</h2><pre id="log"></pre>
 <script>
 const pct=(v,d=1)=>v==null?'-':((v>0?'+':'')+v.toFixed(d)+'%');
@@ -317,12 +333,25 @@ function table(rows,backtest){
  });
  return h+'</table>';
 }
+function foTable(rows){
+ if(!rows.length) return '<div class="dim">none crossed the move/OI thresholds today</div>';
+ let h='<table><tr><th>#</th><th class="l">Stock</th><th class="l">Buildup</th><th>Price</th><th>Chg</th><th>OI Chg</th><th>Lot size</th><th>Margin (est.)</th></tr>';
+ rows.forEach((m,i)=>{
+  h+='<tr><td>'+(i+1)+'</td><td class="l"><b>'+m.symbol+'</b></td>'
+   +'<td class="l"><span class="'+m.buildup.replace(/ /g,"")+'">'+m.buildup+'</span></td>'
+   +'<td>'+m.price.toFixed(2)+'</td><td class="'+cls(m.change)+'">'+pct(m.change)+'</td>'
+   +'<td class="'+cls(m.oi_change)+'">'+pct(m.oi_change)+'</td>'
+   +'<td>'+(m.lot_size||'-')+'</td><td>'+(m.margin_est_lakh?'~'+m.margin_est_lakh+'L':'-')+'</td></tr>';
+ });
+ return h+'</table>';
+}
 let STOP=3,TG=[5,10,20],HOLD=3;
 fetch('/data.json').then(r=>r.json()).then(d=>{
  STOP=d.stop_loss;TG=d.targets;HOLD=d.hold_days;
  const bt=d.mode==='BACKTEST'&&d.top10.some(m=>m.max_gain!=null);
  document.getElementById('status').textContent=d.status;
- document.getElementById('meta').innerHTML='Mode: <b>'+d.mode+'</b> &nbsp; Scan: <b>'+d.date+' '+d.scan_time+'</b> &nbsp; Updated: '+(d.updated||'-')+' &nbsp; Next scan: '+(d.next||'-')+' &nbsp; (page refreshes every 60s)';
+ document.getElementById('meta').innerHTML='Mode: <b>'+d.mode+'</b> &nbsp; Scan: <b>'+d.date+' '+d.scan_time+'</b> &nbsp; Updated: '+(d.updated||'-')+' &nbsp; Next scan: '+(d.next||'-')+' &nbsp; (page refreshes every 60s)'
+  +(d.checked_at?' <br><span class="warn" style="display:inline-block;margin-top:6px">Last checked '+d.checked_at+' - that check came back empty, so this page is still showing results from '+(d.data_from||'the last successful scan')+'.</span>':'');
  document.getElementById('h_top').textContent='TOP '+d.top10.length+' STOCKS (hold up to '+HOLD+' days)';
  document.getElementById('top').innerHTML=table(d.top10,bt);
  document.getElementById('h_both').textContent='1. BOTH - heavy volume AND results trigger ('+d.counts.both+')  <- strongest';
@@ -333,6 +362,8 @@ fetch('/data.json').then(r=>r.json()).then(d=>{
  document.getElementById('vol').innerHTML=table(d.volume_only,bt);
  document.getElementById('h_climb').textContent='4. STEADY CLIMBERS ('+(d.climbers||[]).length+')';
  document.getElementById('climb').innerHTML=table(d.climbers||[],bt);
+ document.getElementById('h_fo').textContent='5. F&O OPEN INTEREST ('+(d.fo||[]).length+') - stock futures, '+(d.fo_date||'-');
+ document.getElementById('fo').innerHTML=foTable(d.fo||[]);
  document.getElementById('log').textContent=d.log.slice().reverse().join('\\n');
 });
 </script></body></html>"""
